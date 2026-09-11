@@ -1,14 +1,26 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Server, AlertOctagon, History, ShieldCheck, Activity } from 'lucide-react';
 import { AuditLogViewer } from './components/AuditLogViewer.js';
+import { DiagnosticsModal } from './components/DiagnosticsModal.js';
 import { Header } from './components/Header.js';
 import { IncidentCard } from './components/IncidentCard.js';
+import { MaintenanceModal } from './components/MaintenanceModal.js';
+import { OnCallBanner } from './components/OnCallBanner.js';
+import { PostMortemModal } from './components/PostMortemModal.js';
+import { ProbeModal } from './components/ProbeModal.js';
 import { RunbookModal } from './components/RunbookModal.js';
 import { ServiceCard } from './components/ServiceCard.js';
 import { TelegramSimulator } from './components/TelegramSimulator.js';
 import { useSSE } from './hooks/useSSE.js';
 import { useTelegram } from './hooks/useTelegram.js';
-import { Incident, RunbookActionId, RunbookExecution, Service } from './types.js';
+import {
+  Incident,
+  OnCallShift,
+  RunbookActionId,
+  RunbookExecution,
+  Service,
+  SloMetrics,
+} from './types.js';
 
 export function App() {
   const {
@@ -25,8 +37,24 @@ export function App() {
   const [services, setServices] = useState<Service[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [history, setHistory] = useState<RunbookExecution[]>([]);
+  const [sloMap, setSloMap] = useState<Record<string, SloMetrics>>({});
+  const [onCall, setOnCall] = useState<OnCallShift | null>(null);
+
+  // Modals state
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [isRunbookOpen, setIsRunbookOpen] = useState(false);
+
+  const [isProbeOpen, setIsProbeOpen] = useState(false);
+  const [probeTarget, setProbeTarget] = useState('');
+
+  const [isMaintenanceOpen, setIsMaintenanceOpen] = useState(false);
+
+  const [diagnosticsIncident, setDiagnosticsIncident] = useState<Incident | null>(null);
+  const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
+
+  const [postMortemIncident, setPostMortemIncident] = useState<Incident | null>(null);
+  const [isPostMortemOpen, setIsPostMortemOpen] = useState(false);
+
   const [activeTab, setActiveTab] = useState<'services' | 'incidents' | 'audit'>('services');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -42,23 +70,43 @@ export function App() {
   const fetchData = useCallback(async () => {
     try {
       const headers = getAuthHeaders();
-      const [srvRes, incRes, histRes] = await Promise.all([
+      const [srvRes, incRes, histRes, onCallRes] = await Promise.all([
         fetch('/api/services', { headers }),
         fetch('/api/incidents', { headers }),
         fetch('/api/runbook/history', { headers }),
+        fetch('/api/oncall', { headers }),
       ]);
 
       if (srvRes.ok) {
-        const data = await srvRes.json();
-        setServices(data);
+        const srvData: Service[] = await srvRes.json();
+        setServices(srvData);
+
+        // Fetch SLO for each service in parallel
+        for (const s of srvData) {
+          fetch(`/api/services/${s.id}/slo`, { headers })
+            .then((r) => r.ok ? r.json() : null)
+            .then((slo: SloMetrics | null) => {
+              if (slo) {
+                setSloMap((prev) => ({ ...prev, [s.id]: slo }));
+              }
+            })
+            .catch(() => {});
+        }
       }
+
       if (incRes.ok) {
         const data = await incRes.json();
         setIncidents(data);
       }
+
       if (histRes.ok) {
         const data = await histRes.json();
         setHistory(data);
+      }
+
+      if (onCallRes.ok) {
+        const data = await onCallRes.json();
+        setOnCall(data);
       }
     } catch (err) {
       console.error('Failed to fetch initial telemetry:', err);
@@ -159,12 +207,38 @@ export function App() {
       throw new Error(data.message || data.error || 'Remediation failed');
     }
 
-    // Refresh history
     setHistory((prev) => [data, ...prev]);
-    // Refresh services & incidents
     fetchData();
-
     return data.output;
+  };
+
+  // Action: Handover On-Call
+  const handleHandover = async (newOperator: string) => {
+    const res = await fetch('/api/oncall/handover', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ primaryOperator: newOperator }),
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      setOnCall(updated);
+    }
+  };
+
+  // Action: Toggle Notification Level
+  const handleToggleNotification = async (serviceId: string) => {
+    const current = services.find((s) => s.id === serviceId)?.notificationLevel || 'CRITICAL_LOUD';
+    const next = current === 'CRITICAL_LOUD' ? 'SILENT' : current === 'SILENT' ? 'MUTED' : 'CRITICAL_LOUD';
+
+    setServices((prev) =>
+      prev.map((s) => (s.id === serviceId ? { ...s, notificationLevel: next } : s))
+    );
+
+    await fetch('/api/notifications/preferences', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ serviceId, level: next }),
+    });
   };
 
   // Action: Quick Anomaly Trigger (Demo)
@@ -194,9 +268,21 @@ export function App() {
         isDark={isDark}
         onToggleTheme={toggleTheme}
         onTriggerAnomaly={handleTriggerAnomaly}
+        onOpenProbe={() => {
+          setProbeTarget(services[0]?.url || 'https://payments.internal.mesh/healthz');
+          setIsProbeOpen(true);
+        }}
+        onOpenMaintenance={() => setIsMaintenanceOpen(true)}
         healthyCount={healthyCount}
         totalServices={services.length}
         openIncidentCount={openIncidents.length}
+      />
+
+      {/* On-Call Duty Banner */}
+      <OnCallBanner
+        onCall={onCall}
+        onHandover={handleHandover}
+        onTriggerHaptic={triggerHaptic}
       />
 
       {/* Navigation Tabs */}
@@ -269,9 +355,9 @@ export function App() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-xs text-tg-hint font-medium px-1">
                   <span>Cluster Endpoints</span>
-                  <span className="text-emerald-400 flex items-center gap-1">
+                  <span className="text-emerald-400 flex items-center gap-1 font-mono text-[11px]">
                     <ShieldCheck className="w-3.5 h-3.5" />
-                    Flap Protected
+                    Flap Protected & SLO Tracked
                   </span>
                 </div>
 
@@ -280,11 +366,18 @@ export function App() {
                     <ServiceCard
                       key={service.id}
                       service={service}
+                      slo={sloMap[service.id]}
                       onOpenRunbook={(srv) => {
                         setSelectedService(srv);
                         setIsRunbookOpen(true);
                         triggerHaptic('medium');
                       }}
+                      onOpenProbe={(srv) => {
+                        setProbeTarget(srv.url);
+                        setIsProbeOpen(true);
+                        triggerHaptic('light');
+                      }}
+                      onToggleNotificationLevel={handleToggleNotification}
                     />
                   ))}
                 </div>
@@ -320,6 +413,16 @@ export function App() {
                             setIsRunbookOpen(true);
                             triggerHaptic('medium');
                           }}
+                          onOpenDiagnostics={(inc) => {
+                            setDiagnosticsIncident(inc);
+                            setIsDiagnosticsOpen(true);
+                            triggerHaptic('light');
+                          }}
+                          onOpenPostMortem={(inc) => {
+                            setPostMortemIncident(inc);
+                            setIsPostMortemOpen(true);
+                            triggerHaptic('light');
+                          }}
                         />
                       );
                     })}
@@ -346,6 +449,47 @@ export function App() {
         }}
         onExecute={handleExecuteRunbook}
         onTriggerHaptic={triggerHaptic}
+      />
+
+      {/* Instant Probe Modal */}
+      <ProbeModal
+        isOpen={isProbeOpen}
+        onClose={() => setIsProbeOpen(false)}
+        services={services}
+        initialTarget={probeTarget}
+        onTriggerHaptic={triggerHaptic}
+      />
+
+      {/* Root-Cause Explainer Modal */}
+      <DiagnosticsModal
+        incident={diagnosticsIncident}
+        isOpen={isDiagnosticsOpen}
+        onClose={() => {
+          setIsDiagnosticsOpen(false);
+          setDiagnosticsIncident(null);
+        }}
+        onExecuteRunbook={handleExecuteRunbook}
+        onTriggerHaptic={triggerHaptic}
+      />
+
+      {/* Post-Mortem Report Modal */}
+      <PostMortemModal
+        incident={postMortemIncident}
+        isOpen={isPostMortemOpen}
+        onClose={() => {
+          setIsPostMortemOpen(false);
+          setPostMortemIncident(null);
+        }}
+        onTriggerHaptic={triggerHaptic}
+      />
+
+      {/* Maintenance Planner Modal */}
+      <MaintenanceModal
+        isOpen={isMaintenanceOpen}
+        onClose={() => setIsMaintenanceOpen(false)}
+        services={services}
+        onTriggerHaptic={triggerHaptic}
+        onRefreshServices={fetchData}
       />
     </div>
   );

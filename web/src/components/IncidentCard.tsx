@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertOctagon, Check, Play, Clock, CheckCircle2 } from 'lucide-react';
+import { AlertOctagon, Check, Play, Clock, CheckCircle2, Brain, FileText } from 'lucide-react';
 import { Incident, Service } from '../types.js';
 
 interface IncidentCardProps {
@@ -7,6 +7,8 @@ interface IncidentCardProps {
   service?: Service;
   onAcknowledge: (incidentId: string) => void;
   onOpenRunbook: (service: Service) => void;
+  onOpenDiagnostics: (incident: Incident) => void;
+  onOpenPostMortem: (incident: Incident) => void;
 }
 
 export const IncidentCard: React.FC<IncidentCardProps> = ({
@@ -14,6 +16,8 @@ export const IncidentCard: React.FC<IncidentCardProps> = ({
   service,
   onAcknowledge,
   onOpenRunbook,
+  onOpenDiagnostics,
+  onOpenPostMortem,
 }) => {
   const isResolved = incident.status === 'RESOLVED';
   const isAcknowledged = incident.status === 'ACKNOWLEDGED';
@@ -31,7 +35,7 @@ export const IncidentCard: React.FC<IncidentCardProps> = ({
     <div
       className={`p-3.5 rounded-2xl transition-all border ${
         isResolved
-          ? 'bg-tg-secondaryBg/40 border-white/5 opacity-70'
+          ? 'bg-tg-secondaryBg/40 border-white/5 opacity-80'
           : incident.severity === 'CRITICAL'
           ? 'bg-red-950/20 border-red-500/30 shadow-md shadow-red-500/5'
           : 'bg-amber-950/20 border-amber-500/30'
@@ -89,39 +93,51 @@ export const IncidentCard: React.FC<IncidentCardProps> = ({
       )}
 
       {/* Triage Actions */}
-      {!isResolved && (
-        <div className="flex items-center justify-between gap-2 mt-3 pt-2 border-t border-white/5">
-          <div className="text-[11px] text-tg-hint">
-            {incident.acknowledgedBy ? (
-              <span>Ack by @{incident.acknowledgedBy}</span>
-            ) : (
-              <span className="text-red-400 font-medium">Unacknowledged</span>
-            )}
-          </div>
+      <div className="flex items-center justify-between gap-2 mt-3 pt-2 border-t border-white/5">
+        <div className="flex items-center gap-1.5">
+          {/* AI Root Cause Explainer button */}
+          <button
+            onClick={() => onOpenDiagnostics(incident)}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-600/15 hover:bg-purple-600/25 text-purple-300 border border-purple-500/30 transition-all active:scale-95"
+          >
+            <Brain className="w-3.5 h-3.5 text-purple-400" />
+            <span>Diagnose</span>
+          </button>
 
-          <div className="flex items-center gap-2">
-            {!isAcknowledged && (
-              <button
-                onClick={() => onAcknowledge(incident.id)}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-white/5 hover:bg-white/10 text-tg-text border border-white/10 transition-all active:scale-95"
-              >
-                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Ack</span>
-              </button>
-            )}
-
-            {service && (
-              <button
-                onClick={() => onOpenRunbook(service)}
-                className="flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 transition-all active:scale-95"
-              >
-                <Play className="w-3 h-3 fill-current" />
-                <span>Runbook</span>
-              </button>
-            )}
-          </div>
+          {/* Post-Mortem Report Button */}
+          {isResolved && (
+            <button
+              onClick={() => onOpenPostMortem(incident)}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium bg-white/5 hover:bg-white/10 text-tg-text border border-white/10 transition-all active:scale-95"
+            >
+              <FileText className="w-3.5 h-3.5 text-blue-400" />
+              <span>Post-Mortem</span>
+            </button>
+          )}
         </div>
-      )}
+
+        <div className="flex items-center gap-2">
+          {!isResolved && !isAcknowledged && (
+            <button
+              onClick={() => onAcknowledge(incident.id)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-white/5 hover:bg-white/10 text-tg-text border border-white/10 transition-all active:scale-95"
+            >
+              <Check className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Ack</span>
+            </button>
+          )}
+
+          {!isResolved && service && (
+            <button
+              onClick={() => onOpenRunbook(service)}
+              className="flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 transition-all active:scale-95"
+            >
+              <Play className="w-3 h-3 fill-current" />
+              <span>Runbook</span>
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

@@ -196,3 +196,174 @@ data: {"serviceId":"srv_payments","timestamp":1741738230000,"latencyMs":132.8,"s
 event: incident
 data: {"type":"CREATED","incident":{"id":"inc_98231","serviceId":"srv_payments","title":"HTTP 504 Gateway Timeout","status":"OPEN","severity":"CRITICAL","startedAt":1741738150000}}
 ```
+
+---
+
+### 7. Synthetic Health Probe
+
+```http
+POST /api/probe
+```
+
+Runs an ad-hoc diagnostic probe against an external or internal target with DNS, TCP, TLS handshake, TTFB, and SSL certificate expiration.
+
+**Request Body:**
+```json
+{
+  "target": "https://api.internal.net/health",
+  "method": "GET",
+  "timeoutMs": 5000
+}
+```
+
+**Response (`200 OK`):**
+```json
+{
+  "target": "https://api.internal.net/health",
+  "resolvedIp": "10.0.4.12",
+  "protocol": "https",
+  "statusCode": 200,
+  "timing": {
+    "dnsMs": 12,
+    "tcpMs": 18,
+    "tlsHandshakeMs": 35,
+    "ttfbMs": 95,
+    "totalMs": 160
+  },
+  "ssl": {
+    "valid": true,
+    "daysRemaining": 84,
+    "issuer": "Let's Encrypt Authority X3",
+    "expiresAt": "2026-06-04T12:00:00.000Z"
+  }
+}
+```
+
+---
+
+### 8. Incident Diagnostics & Root Cause
+
+```http
+GET /api/incidents/:id/diagnostics
+```
+
+Analyzes recent latency ticks, HTTP error patterns, and system telemetry to identify the probable cause and recommend an automated runbook.
+
+**Response (`200 OK`):**
+```json
+{
+  "incidentId": "inc_98231",
+  "probableCause": "Upstream service timeout or database connection pool exhaustion",
+  "confidence": 0.88,
+  "telemetryEvidence": [
+    "5xx error rate spiked to 78.4% over 5m",
+    "p95 latency jumped from 140ms to 4200ms"
+  ],
+  "recommendedAction": "restart_container",
+  "reasoning": "Connection pool leaks in this service are typically remediated by cycling container worker processes."
+}
+```
+
+---
+
+### 9. Post-Mortem Report Generator
+
+```http
+POST /api/incidents/:id/postmortem
+```
+
+Generates or retrieves a structured Markdown post-mortem document for an incident.
+
+**Response (`200 OK`):**
+```json
+{
+  "id": "pm_98231",
+  "incidentId": "inc_98231",
+  "markdown": "# Incident Post-Mortem: Payment Gateway API\n\n**Incident ID:** `inc_98231`...",
+  "generatedAt": 1741738300000,
+  "author": "alexandrmotologa"
+}
+```
+
+---
+
+### 10. SLO & Error Budget Metrics
+
+```http
+GET /api/services/:id/slo
+```
+
+Calculates the rolling 30-day uptime percentage, remaining error budget, and current burn rate multiplier.
+
+**Response (`200 OK`):**
+```json
+{
+  "serviceId": "srv_payments",
+  "targetUptime": 99.9,
+  "actualUptime": 99.72,
+  "errorBudgetRemaining": 28.5,
+  "burnRateMultiplier": 4.2,
+  "status": "WARNING",
+  "windowDays": 30
+}
+```
+
+---
+
+### 11. Scheduled Maintenance Windows
+
+```http
+GET /api/maintenance
+POST /api/maintenance
+```
+
+List or create scheduled maintenance windows. While a window is active, alert notifications for that service are suppressed.
+
+**POST Request Body:**
+```json
+{
+  "serviceId": "srv_payments",
+  "title": "Database Index Rebuild",
+  "startTime": 1741738400000,
+  "endTime": 1741742000000,
+  "reason": "Scheduled quarterly database defragmentation"
+}
+```
+
+---
+
+### 12. On-Call Rotation & Handover
+
+```http
+GET /api/oncall
+POST /api/oncall/handover
+```
+
+View active on-call shift status or transfer duty to a colleague.
+
+**POST Request Body:**
+```json
+{
+  "newOperator": "@alexandrmotologa",
+  "reason": "Shift rotation handover"
+}
+```
+
+---
+
+### 13. Notification Urgency Preferences
+
+```http
+GET /api/notifications/preferences
+PUT /api/notifications/preferences
+```
+
+Configure per-service alert urgency mode (`CRITICAL_LOUD`, `SILENT`, `MUTED`).
+
+**PUT Request Body:**
+```json
+{
+  "serviceId": "srv_payments",
+  "mode": "CRITICAL_LOUD"
+}
+```

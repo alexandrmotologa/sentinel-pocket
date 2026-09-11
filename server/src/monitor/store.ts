@@ -5,6 +5,9 @@ import {
   Incident,
   IncidentStatus,
   LatencyTick,
+  MaintenanceWindow,
+  OnCallShift,
+  PostMortem,
   RunbookExecution,
   Service,
 } from '../types.js';
@@ -32,7 +35,7 @@ export class MonitorStore {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         url TEXT NOT NULL,
-        status TEXT NOT NULL CHECK (status IN ('HEALTHY', 'DEGRADED', 'DOWN')),
+        status TEXT NOT NULL CHECK (status IN ('HEALTHY', 'DEGRADED', 'DOWN', 'MAINTENANCE')),
         latency_p95 REAL NOT NULL DEFAULT 0,
         last_check INTEGER NOT NULL,
         silenced_until INTEGER
@@ -75,7 +78,68 @@ export class MonitorStore {
       );
 
       CREATE INDEX IF NOT EXISTS idx_runbook_time ON runbook_executions(triggered_at DESC);
+
+      CREATE TABLE IF NOT EXISTS post_mortems (
+        id TEXT PRIMARY KEY,
+        incident_id TEXT NOT NULL UNIQUE,
+        service_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        resolved_at INTEGER NOT NULL,
+        downtime_seconds INTEGER NOT NULL,
+        acknowledged_by TEXT,
+        root_cause TEXT NOT NULL,
+        remediation_action TEXT NOT NULL,
+        failed_checks_count INTEGER NOT NULL,
+        markdown_report TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS maintenance_windows (
+        id TEXT PRIMARY KEY,
+        service_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        starts_at INTEGER NOT NULL,
+        ends_at INTEGER NOT NULL,
+        created_by TEXT NOT NULL,
+        reason TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS on_call_shifts (
+        id TEXT PRIMARY KEY,
+        primary_operator TEXT NOT NULL,
+        secondary_operator TEXT,
+        started_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        notes TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS notification_preferences (
+        service_id TEXT PRIMARY KEY,
+        level TEXT NOT NULL CHECK (level IN ('CRITICAL_LOUD', 'SILENT', 'MUTED')),
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE
+      );
     `);
+
+    // Ensure default on-call shift exists
+    this.ensureDefaultOnCall();
+  }
+
+  private ensureDefaultOnCall(): void {
+    const stmt = this.db.prepare(`SELECT COUNT(*) as count FROM on_call_shifts`);
+    const row = stmt.get() as any;
+    if (row && Number(row.count) === 0) {
+      const now = Date.now();
+      const insert = this.db.prepare(`
+        INSERT INTO on_call_shifts (id, primary_operator, secondary_operator, started_at, updated_at, notes)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      insert.run('shift_current', 'alexandrmotologa', 'devops_oncall', now, now, 'Primary 24/7 on-call rotation');
+    }
   }
 
   public upsertService(service: Service): void {
@@ -110,16 +174,25 @@ export class MonitorStore {
     `);
 
     const rows = stmt.all() as any[];
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      url: row.url,
-      status: row.status,
-      latencyP95: Number(row.latencyP95),
-      lastCheck: Number(row.lastCheck),
-      silencedUntil: row.silencedUntil ? Number(row.silencedUntil) : null,
-      recentLatencies: this.getRecentLatencyTicks(row.id, 20),
-    }));
+    const now = Date.now();
+
+    return rows.map((row) => {
+      // Check active maintenance windows
+      const isUnderMaintenance = this.isServiceUnderMaintenance(row.id, now);
+      const notifLevel = this.getNotificationPreference(row.id);
+
+      return {
+        id: row.id,
+        name: row.name,
+        url: row.url,
+        status: isUnderMaintenance ? 'MAINTENANCE' : row.status,
+        latencyP95: Number(row.latencyP95),
+        lastCheck: Number(row.lastCheck),
+        silencedUntil: row.silencedUntil ? Number(row.silencedUntil) : null,
+        recentLatencies: this.getRecentLatencyTicks(row.id, 20),
+        notificationLevel: notifLevel,
+      };
+    });
   }
 
   public getServiceById(id: string): Service | null {
@@ -132,15 +205,19 @@ export class MonitorStore {
     const row = stmt.get(id) as any;
     if (!row) return null;
 
+    const now = Date.now();
+    const isUnderMaintenance = this.isServiceUnderMaintenance(row.id, now);
+
     return {
       id: row.id,
       name: row.name,
       url: row.url,
-      status: row.status,
+      status: isUnderMaintenance ? 'MAINTENANCE' : row.status,
       latencyP95: Number(row.latencyP95),
       lastCheck: Number(row.lastCheck),
       silencedUntil: row.silencedUntil ? Number(row.silencedUntil) : null,
       recentLatencies: this.getRecentLatencyTicks(row.id, 20),
+      notificationLevel: this.getNotificationPreference(row.id),
     };
   }
 
@@ -247,6 +324,19 @@ export class MonitorStore {
     return rows.map(this.mapIncident);
   }
 
+  public getIncidentById(id: string): Incident | null {
+    const stmt = this.db.prepare(`
+      SELECT id, service_id as serviceId, title, status, severity,
+             started_at as startedAt, resolved_at as resolvedAt,
+             error_details as errorDetails, acknowledged_by as acknowledgedBy
+      FROM incidents
+      WHERE id = ?
+    `);
+    const row = stmt.get(id) as any;
+    if (!row) return null;
+    return this.mapIncident(row);
+  }
+
   public silenceService(serviceId: string, until: number): void {
     const stmt = this.db.prepare(`
       UPDATE services
@@ -293,6 +383,202 @@ export class MonitorStore {
       status: r.status,
       output: r.output,
     }));
+  }
+
+  // --- Post-Mortem Methods ---
+  public savePostMortem(pm: PostMortem): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO post_mortems (
+        id, incident_id, service_id, title, started_at, resolved_at,
+        downtime_seconds, acknowledged_by, root_cause, remediation_action,
+        failed_checks_count, markdown_report, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(incident_id) DO UPDATE SET
+        markdown_report = excluded.markdown_report,
+        root_cause = excluded.root_cause,
+        remediation_action = excluded.remediation_action
+    `);
+
+    stmt.run(
+      pm.id,
+      pm.incidentId,
+      pm.serviceId,
+      pm.title,
+      pm.startedAt,
+      pm.resolvedAt,
+      pm.downtimeSeconds,
+      pm.acknowledgedBy || null,
+      pm.rootCause,
+      pm.remediationAction,
+      pm.failedChecksCount,
+      pm.markdownReport,
+      pm.createdAt
+    );
+  }
+
+  public getPostMortemByIncidentId(incidentId: string): PostMortem | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM post_mortems WHERE incident_id = ?
+    `);
+    const row = stmt.get(incidentId) as any;
+    if (!row) return null;
+    return {
+      id: row.id,
+      incidentId: row.incident_id,
+      serviceId: row.service_id,
+      title: row.title,
+      startedAt: Number(row.started_at),
+      resolvedAt: Number(row.resolved_at),
+      downtimeSeconds: Number(row.downtime_seconds),
+      acknowledgedBy: row.acknowledged_by || undefined,
+      rootCause: row.root_cause,
+      remediationAction: row.remediation_action,
+      failedChecksCount: Number(row.failed_checks_count),
+      markdownReport: row.markdown_report,
+      createdAt: Number(row.created_at),
+    };
+  }
+
+  public getPostMortems(limit = 20): PostMortem[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM post_mortems ORDER BY created_at DESC LIMIT ?
+    `);
+    const rows = stmt.all(limit) as any[];
+    return rows.map((row) => ({
+      id: row.id,
+      incidentId: row.incident_id,
+      serviceId: row.service_id,
+      title: row.title,
+      startedAt: Number(row.started_at),
+      resolvedAt: Number(row.resolved_at),
+      downtimeSeconds: Number(row.downtime_seconds),
+      acknowledgedBy: row.acknowledged_by || undefined,
+      rootCause: row.root_cause,
+      remediationAction: row.remediation_action,
+      failedChecksCount: Number(row.failed_checks_count),
+      markdownReport: row.markdown_report,
+      createdAt: Number(row.created_at),
+    }));
+  }
+
+  // --- Maintenance Windows ---
+  public createMaintenanceWindow(window: MaintenanceWindow): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO maintenance_windows (id, service_id, title, starts_at, ends_at, created_by, reason, active)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      window.id,
+      window.serviceId,
+      window.title,
+      window.startsAt,
+      window.endsAt,
+      window.createdBy,
+      window.reason || null,
+      window.active ? 1 : 0
+    );
+  }
+
+  public getMaintenanceWindows(activeOnly = true): MaintenanceWindow[] {
+    const now = Date.now();
+    let query = `SELECT * FROM maintenance_windows`;
+    if (activeOnly) {
+      query += ` WHERE active = 1 AND ends_at > ?`;
+      const stmt = this.db.prepare(query + ` ORDER BY starts_at ASC`);
+      const rows = stmt.all(now) as any[];
+      return rows.map(this.mapMaintenanceWindow);
+    }
+    const stmt = this.db.prepare(query + ` ORDER BY starts_at DESC LIMIT 30`);
+    const rows = stmt.all() as any[];
+    return rows.map(this.mapMaintenanceWindow);
+  }
+
+  public isServiceUnderMaintenance(serviceId: string, timestamp: number): boolean {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) as count FROM maintenance_windows
+      WHERE service_id = ? AND active = 1 AND starts_at <= ? AND ends_at >= ?
+    `);
+    const row = stmt.get(serviceId, timestamp, timestamp) as any;
+    return row && Number(row.count) > 0;
+  }
+
+  private mapMaintenanceWindow(r: any): MaintenanceWindow {
+    return {
+      id: r.id,
+      serviceId: r.service_id,
+      title: r.title,
+      startsAt: Number(r.starts_at),
+      endsAt: Number(r.ends_at),
+      createdBy: r.created_by,
+      reason: r.reason || undefined,
+      active: Number(r.active) === 1,
+    };
+  }
+
+  // --- On-Call Management ---
+  public getCurrentOnCall(): OnCallShift {
+    const stmt = this.db.prepare(`
+      SELECT * FROM on_call_shifts ORDER BY rowid DESC LIMIT 1
+    `);
+    const row = stmt.get() as any;
+    if (row) {
+      return {
+        id: row.id,
+        primaryOperator: row.primary_operator,
+        secondaryOperator: row.secondary_operator || undefined,
+        startedAt: Number(row.started_at),
+        updatedAt: Number(row.updated_at),
+        notes: row.notes || undefined,
+      };
+    }
+    return {
+      id: 'shift_default',
+      primaryOperator: 'alexandrmotologa',
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+  }
+
+  public setOnCall(primary: string, secondary?: string, notes?: string): OnCallShift {
+    const now = Date.now();
+    const id = `shift_${now}`;
+    const stmt = this.db.prepare(`
+      INSERT INTO on_call_shifts (id, primary_operator, secondary_operator, started_at, updated_at, notes)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(id, primary, secondary || null, now, now, notes || null);
+    return {
+      id,
+      primaryOperator: primary,
+      secondaryOperator: secondary,
+      startedAt: now,
+      updatedAt: now,
+      notes,
+    };
+  }
+
+  // --- Notification Preferences ---
+  public getNotificationPreference(serviceId: string): 'CRITICAL_LOUD' | 'SILENT' | 'MUTED' {
+    const stmt = this.db.prepare(`
+      SELECT level FROM notification_preferences WHERE service_id = ?
+    `);
+    const row = stmt.get(serviceId) as any;
+    if (row && row.level) return row.level;
+    return 'CRITICAL_LOUD';
+  }
+
+  public setNotificationPreference(
+    serviceId: string,
+    level: 'CRITICAL_LOUD' | 'SILENT' | 'MUTED'
+  ): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO notification_preferences (service_id, level, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(service_id) DO UPDATE SET
+        level = excluded.level,
+        updated_at = excluded.updated_at
+    `);
+    stmt.run(serviceId, level, Date.now());
   }
 
   private mapIncident(r: any): Incident {

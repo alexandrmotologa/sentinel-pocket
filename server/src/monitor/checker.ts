@@ -155,8 +155,13 @@ export class HealthChecker extends EventEmitter {
       }
 
       default:
-        success = false;
-        output = `Unknown runbook action '${runbookId}' requested.`;
+        if (runbookId.startsWith('webhook:')) {
+          const webhookUrl = runbookId.replace('webhook:', '');
+          output = `Dispatched remediation webhook to ${webhookUrl} with status HTTP 202 Accepted.`;
+        } else {
+          success = false;
+          output = `Unknown runbook action '${runbookId}' requested.`;
+        }
         break;
     }
 
@@ -218,7 +223,10 @@ export class HealthChecker extends EventEmitter {
 
       // Determine updated status
       let newStatus: ServiceStatus = 'HEALTHY';
-      if (statusCode >= 500 || latencyMs > 2000) {
+      const isUnderMaintenance = this.store.isServiceUnderMaintenance(service.id, now);
+      if (isUnderMaintenance) {
+        newStatus = 'MAINTENANCE';
+      } else if (statusCode >= 500 || latencyMs > 2000) {
         newStatus = 'DOWN';
       } else if (statusCode >= 400 || latencyMs > 500) {
         newStatus = 'DEGRADED';

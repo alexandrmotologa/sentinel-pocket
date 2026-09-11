@@ -56,11 +56,16 @@ Sentinel Pocket is a mobile incident cockpit and Telegram Mini App companion for
 
 - **Long Polling Telegram Bot:** Operates behind firewalls and NAT without public webhooks, domain names, or reverse proxies.
 - **Cryptographic initData Verification:** Implements Telegram's HMAC-SHA256 validation algorithm with 24-hour timestamp freshness checks to block forged requests.
-- **Zero-Dependency Persistence:** Uses Node's built-in SQLite engine (`node:sqlite`) to record latency ticks, incident transitions, and runbook execution logs.
+- **Zero-Dependency Persistence:** Uses Node's built-in SQLite engine (`node:sqlite`) to record latency ticks, incident transitions, runbooks, maintenance windows, and on-call rotations.
 - **Live Server-Sent Events (SSE):** Streams latency updates and state transitions over `/api/stream` with periodic keep-alive comments.
-- **Integrated Runbook Automation:** Triggers container restarts, cache flushes, and canary rollbacks against `canarymesh`.
+- **Instant Health Probe Tool:** Run ad-hoc HTTP/HTTPS/TCP probes from the app or bot (`/probe`) with full DNS, TCP, TLS handshake, TTFB waterfall timing, and SSL certificate expiration checks.
+- **Root Cause Explainer (Diagnostic Engine):** Evaluates error spikes, status distributions, and latency degradation to present probable causes with actionable runbook recommendations.
+- **SLO & Burn Rate Cockpit:** Monitors 30-day rolling error budgets and multi-window burn rate multipliers with real-time badges.
+- **1-Tap Post-Mortem Generator:** Produces structured Markdown incident reports with root cause summaries and timeline data, ready for one-tap Telegram sharing.
+- **Scheduled Maintenance Windows:** Schedule planned downtime windows that automatically suppress alert notifications.
+- **On-Call Shift Cockpit & Handover:** Manage on-call rotations via `/oncall` and execute instant shift transfers with `/handover`.
+- **Custom Webhook Runbooks:** Trigger external webhook endpoints or built-in remediation actions (container restarts, cache flushes, canary rollbacks).
 - **In-Browser TMA Simulator:** Automatically displays a phone mockup with theme switching and mock user selection when opened in a standard web browser.
-- **Full Mock Mode:** Simulates network latency jitter, synthetic service failures, and alert broadcasts out of the box.
 
 ## Ecosystem Bridge
 
@@ -156,9 +161,13 @@ Open `http://localhost:8080` in your web browser. The built-in Telegram Mini App
 | Command | Description |
 |---|---|
 | `/start` | Displays the welcome card and opens the Sentinel Pocket Mini App button. |
-| `/status` | Summarizes service uptime percentages and overall cluster status. |
-| `/alerts` | Lists unacknowledged incidents with inline triage actions. |
-| `/help` | Explains available bot commands and runbook capabilities. |
+| `/status` | Summarizes service uptime percentages, burn rates, and overall cluster status. |
+| `/alerts` | Lists unacknowledged incidents with inline triage actions and post-mortem shortcuts. |
+| `/probe <url>` | Runs an instant synthetic probe against any HTTP/HTTPS target with DNS, TTFB, and SSL metrics. |
+| `/oncall` | Shows who is currently on-call, escalation contacts, and shift end times. |
+| `/handover <user>` | Transfers on-call duty to a new operator and logs the handover event. |
+| `/postmortem <id>` | Generates a structured Markdown post-mortem for the specified incident ID. |
+| `/help` | Explains available bot commands, probe options, and runbook capabilities. |
 
 ## Runbook Remediation Actions
 
