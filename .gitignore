@@ -9,6 +9,7 @@ package-lock.json
 dist/
 build/
 .tsbuildinfo
+*.tsbuildinfo
 
 # Environment & Secrets
 .env
