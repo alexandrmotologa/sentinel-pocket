@@ -35,6 +35,7 @@ export const PostMortemModal: React.FC<PostMortemModalProps> = ({
             'Content-Type': 'application/json',
             Authorization: 'tma mock',
           },
+          body: JSON.stringify({}),
         });
         if (res.ok) {
           const data = await res.json();

@@ -1,14 +1,38 @@
-# Sentinel Pocket
+<p align="center">
+  <img src="docs/images/logo.png?raw=true" alt="Sentinel Pocket Logo" width="130" style="border-radius: 24px;" />
+</p>
 
-[![CI](https://github.com/alexandrmotologa/sentinel-pocket/actions/workflows/ci.yml/badge.svg)](https://github.com/alexandrmotologa/sentinel-pocket/actions/workflows/ci.yml)
-[![Node](https://img.shields.io/badge/node-22%2B%20%7C%2024-blue.svg)](https://nodejs.org/)
-[![TypeScript](https://img.shields.io/badge/typescript-5.8-blue.svg)](https://www.typescriptlang.org/)
-[![React](https://img.shields.io/badge/react-19-61dafb.svg)](https://react.dev/)
-[![Fastify](https://img.shields.io/badge/fastify-4.x-black.svg)](https://fastify.dev/)
-[![Telegram](https://img.shields.io/badge/telegram-Mini%20App%20%26%20Bot-229ED9.svg)](https://core.telegram.org/bots/webapps)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+<h1 align="center">Sentinel Pocket</h1>
+
+<p align="center">
+  <b>Mobile Incident Cockpit & Telegram Mini App Companion for SRE & DevOps Engineers</b>
+</p>
+
+<p align="center">
+  <a href="https://github.com/alexandrmotologa/sentinel-pocket/actions/workflows/ci.yml"><img src="https://github.com/alexandrmotologa/sentinel-pocket/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-22%2B%20%7C%2024-blue.svg" alt="Node" /></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/typescript-5.8-blue.svg" alt="TypeScript" /></a>
+  <a href="https://react.dev/"><img src="https://img.shields.io/badge/react-19-61dafb.svg" alt="React 19" /></a>
+  <a href="https://fastify.dev/"><img src="https://img.shields.io/badge/fastify-4.x-black.svg" alt="Fastify" /></a>
+  <a href="https://core.telegram.org/bots/webapps"><img src="https://img.shields.io/badge/telegram-Mini%20App%20%26%20Bot-229ED9.svg" alt="Telegram" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License" /></a>
+</p>
 
 Sentinel Pocket is a mobile incident cockpit and Telegram Mini App companion for [alexandrmotologa/sentinel](https://github.com/alexandrmotologa/sentinel) and [alexandrmotologa/canarymesh](https://github.com/alexandrmotologa/canarymesh). It provides cluster health surveillance, real-time alert triage via Telegram Long Polling, and one-tap remediation runbooks directly from a mobile device.
+
+## Mobile Cockpit Interface
+
+Sentinel Pocket operates as both a responsive Telegram Mini App and a standalone browser cockpit with an integrated device simulator:
+
+| Live SRE Telemetry & Triage Cockpit | Instant Synthetic Health Probe |
+|:---:|:---:|
+| <img src="docs/images/screenshot_cockpit.png?raw=true" alt="Cockpit Overview" width="540" /> | <img src="docs/images/screenshot_probe.png?raw=true" alt="Instant Probe" width="540" /> |
+| *Real-time latency sparklines, SLO burn rate badges, and on-call handover banner.* | *Ad-hoc HTTP/HTTPS/TCP probing with DNS, TTFB, and SSL certificate expiration.* |
+
+| Root Cause Explainer & Diagnostics | 1-Tap Incident Post-Mortem Generator |
+|:---:|:---:|
+| <img src="docs/images/screenshot_diagnostics.png?raw=true" alt="Diagnostics Engine" width="540" /> | <img src="docs/images/screenshot_postmortem.png?raw=true" alt="Post-Mortem Generator" width="540" /> |
+| *Automated 5xx spike analysis with confidence score and recommended runbook.* | *Structured Markdown post-mortem with downtime calculation and Telegram share.* |
 
 ```
                   +----------------------------------------------+
